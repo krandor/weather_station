@@ -119,119 +119,121 @@ class DisplayWrapper:
         self._display.display()
 
 
-_bus = SMBus(0)
+class TempWrapper:
+    _bus=None
 
-whoami = _bus.read_byte_data(MPL3115A2_ADDRESS, MPL3115A2_WHOAMI)
+    def __init__(self):
+        self._bus = SMBus(0)
+        whoami = self._bus.read_byte_data(MPL3115A2_ADDRESS, MPL3115A2_WHOAMI)
 
-if whoami != 0xc4:
-    print("MPL3115A2 not active.")
-    exit(1)
+        if whoami != 0xc4:
+            print("MPL3115A2 not active.")
+            exit(1)
 
-# Set MPL3115A2 oversampling to 128, put in Altimeter mode, enabled standby on CTRL_REG1
-_bus.write_byte_data(
-    MPL3115A2_ADDRESS,
-    MPL3115A2_CTRL_REG1,
-    MPL3115A2_CTRL_REG1_SBYB |
-    MPL3115A2_CTRL_REG1_OS128 |
-    MPL3115A2_CTRL_REG1_ALT)
+        # Set MPL3115A2 oversampling to 128, put in Altimeter mode, enabled standby on CTRL_REG1
+        self._bus.write_byte_data(
+            MPL3115A2_ADDRESS,
+            MPL3115A2_CTRL_REG1,
+            MPL3115A2_CTRL_REG1_SBYB |
+            MPL3115A2_CTRL_REG1_OS128 |
+            MPL3115A2_CTRL_REG1_ALT)
 
-# Configure MPL3115A2
-_bus.write_byte_data(
-    MPL3115A2_ADDRESS,
-    MPL3115A2_PT_DATA_CFG,
-    MPL3115A2_PT_DATA_CFG_TDEFE |
-    MPL3115A2_PT_DATA_CFG_PDEFE |
-    MPL3115A2_PT_DATA_CFG_DREM)
-
-
-def poll():
-    #    print "Polling..."
-    sta = 0
-    while not (sta & MPL3115A2_REGISTER_STATUS_PDR):
-        sta = _bus.read_byte_data(MPL3115A2_ADDRESS, MPL3115A2_REGISTER_STATUS)
+        # Configure MPL3115A2
+        self._bus.write_byte_data(
+            MPL3115A2_ADDRESS,
+            MPL3115A2_PT_DATA_CFG,
+            MPL3115A2_PT_DATA_CFG_TDEFE |
+            MPL3115A2_PT_DATA_CFG_PDEFE |
+            MPL3115A2_PT_DATA_CFG_DREM)
 
 
-def altitude():
-    # print "Reading Altitude Data..."
-    _bus.write_byte_data(
-        MPL3115A2_ADDRESS,
-        MPL3115A2_CTRL_REG1,
-        MPL3115A2_CTRL_REG1_SBYB |
-        MPL3115A2_CTRL_REG1_OS128 |
-        MPL3115A2_CTRL_REG1_ALT)  # change to altimeter mode
-
-    poll()
-
-    msb, csb, lsb = _bus.read_i2c_block_data(MPL3115A2_ADDRESS, MPL3115A2_REGISTER_PRESSURE_MSB, 3)
-    # print msb, csb, lsb
-
-    alt = float((((msb << 24) | (csb << 16) | (lsb)) * 10) / 65536)
-
-    # correct sign
-    if alt > (1 << 15):
-        alt -= 1 << 16
-
-    return alt
+    def poll(self):
+        sta = 0
+        while not (sta & MPL3115A2_REGISTER_STATUS_PDR):
+            sta = self._bus.read_byte_data(MPL3115A2_ADDRESS, MPL3115A2_REGISTER_STATUS)
 
 
-def pressure():
-    # print "Reading Pressure Data..."
-    _bus.write_byte_data(
-        MPL3115A2_ADDRESS,
-        MPL3115A2_CTRL_REG1,
-        MPL3115A2_CTRL_REG1_SBYB |
-        MPL3115A2_CTRL_REG1_OS128 |
-        MPL3115A2_CTRL_REG1_BAR)  # change to barometer mode
+    def altitude(self):
+        # print "Reading Altitude Data..."
+        self._bus.write_byte_data(
+            MPL3115A2_ADDRESS,
+            MPL3115A2_CTRL_REG1,
+            MPL3115A2_CTRL_REG1_SBYB |
+            MPL3115A2_CTRL_REG1_OS128 |
+            MPL3115A2_CTRL_REG1_ALT)  # change to altimeter mode
 
-    poll()
+        self.poll()
 
-    msb, csb, lsb = _bus.read_i2c_block_data(MPL3115A2_ADDRESS, MPL3115A2_REGISTER_PRESSURE_MSB, 3)
-    # print msb, csb, lsb
+        msb, csb, lsb = self._bus.read_i2c_block_data(MPL3115A2_ADDRESS, MPL3115A2_REGISTER_PRESSURE_MSB, 3)
+        # print msb, csb, lsb
 
-    return ((msb << 16) | (csb << 8) | lsb) / 64.
+        alt = float((((msb << 24) | (csb << 16) | lsb) * 10) / 65536)
 
+        # correct sign
+        if alt > (1 << 15):
+            alt -= 1 << 16
 
-def calibrate():
-    # print "Calibrating..."
-    p = 0
-    t = 0
-    a = 0
-
-    for i in np.arange(1, 6, 1):
-        p = p + pressure()
-        t = t + temperature()
-        a = a + altitude()
-        # print "p: "+str(p)+" t: "+str(t)
-
-    pa = int((p / 10) / 2)
-    ta = (t / 10)
-    aa = (a / 10)
-    _bus.write_i2c_block_data(MPL3115A2_ADDRESS, MPL3115A2_BAR_IN_MSB, [pa >> 8 & 0xff, pa & 0xff])
-
-    return [pa, ta, aa]
+        return alt
 
 
-def temperature():
-    # print "Reading Temperature Data..."
+    def pressure(self):
+        # print "Reading Pressure Data..."
+        self._bus.write_byte_data(
+            MPL3115A2_ADDRESS,
+            MPL3115A2_CTRL_REG1,
+            MPL3115A2_CTRL_REG1_SBYB |
+            MPL3115A2_CTRL_REG1_OS128 |
+            MPL3115A2_CTRL_REG1_BAR)  # change to barometer mode
 
-    _bus.write_byte_data(
-        MPL3115A2_ADDRESS,
-        MPL3115A2_CTRL_REG1,
-        MPL3115A2_CTRL_REG1_SBYB |
-        MPL3115A2_CTRL_REG1_OS128 |
-        MPL3115A2_CTRL_REG1_BAR)
+        self.poll()
 
-    poll()
+        msb, csb, lsb = self._bus.read_i2c_block_data(MPL3115A2_ADDRESS, MPL3115A2_REGISTER_PRESSURE_MSB, 3)
+        # print msb, csb, lsb
 
-    t_data = _bus.read_i2c_block_data(MPL3115A2_ADDRESS, 0x04, 2)
-    #status = _bus.read_byte_data(MPL3115A2_ADDRESS, 0x00)
+        return ((msb << 16) | (csb << 8) | lsb) / 64.
 
-    # print t_data
+    def calibrate(self):
+        # print "Calibrating..."
+        p = 0
+        t = 0
+        a = 0
 
-    return t_data[0] + (t_data[1] >> 4) / 16.0
+        for _i in np.arange(1, 6, 1):
+            p += self.pressure()
+            t += self.temperature()
+            a += self.altitude()
+
+        pa = int((p / 10) / 2)
+        ta = (t / 10)
+        aa = (a / 10)
+
+        self._bus.write_i2c_block_data(MPL3115A2_ADDRESS, MPL3115A2_BAR_IN_MSB, [pa >> 8 & 0xff, pa & 0xff])
+
+        return [pa, ta, aa]
+
+
+    def temperature(self):
+        # print "Reading Temperature Data..."
+
+        self._bus.write_byte_data(
+            MPL3115A2_ADDRESS,
+            MPL3115A2_CTRL_REG1,
+            MPL3115A2_CTRL_REG1_SBYB |
+            MPL3115A2_CTRL_REG1_OS128 |
+            MPL3115A2_CTRL_REG1_BAR)
+
+        self.poll()
+
+        t_data = self._bus.read_i2c_block_data(MPL3115A2_ADDRESS, 0x04, 2)
+        #status = _bus.read_byte_data(MPL3115A2_ADDRESS, 0x00)
+
+        # print t_data
+
+        return t_data[0] + (t_data[1] >> 4) / 16.0
 
 
 dw = DisplayWrapper()
+tw = TempWrapper()
 
 try:
     # Draw a black filled box to clear the image.
@@ -243,7 +245,7 @@ try:
     padding = 2
     shape_width = 20
     top = padding
-    bottom = dw.height() - padding
+    bottom = dw.height - padding
     # Move left to right keeping track of the current x position for drawing shapes.
     x = 5
 
@@ -251,15 +253,15 @@ try:
     dw.drawText('Calibrating...', x, top)
     dw.displayImage()
 
-    calibrate()
+    tw.calibrate()
 
     i = 0
 
     while 1:
         # get readings
-        tempC = temperature()  # temp in Celcius
+        tempC = tw.temperature()  # temp in Celcius
         tempF = (tempC * 1.8) + 32
-        press = (pressure() / 1000)  # get pressure and convert to kPa
+        press = (tw.pressure() / 1000)  # get pressure and convert to kPa
         # clear display
         dw.clearDisplay()
         # draw readings to image
