@@ -1,239 +1,40 @@
 #!/usr/bin/python
-import time
 import sys
-import numpy as np
-import Adafruit_SSD1306
-import Image
-import ImageDraw
-import ImageFont
-from smbus import SMBus
-from sys import exit
+import threading
+import time
+from MPL3115A2 import Mpl3115a2
+from SSD1306 import Ssd1306
+from TSL2591 import Tsl2591
+
+
+class GetSensorReadingsThread(threading.Thread):
+    def __init__(self, mpl3115a2, tsl2591):
+        self.tempC = 0
+        self.tempF = 0
+        self.pressure = 0
+        self.lux = 0
+        self.tw = mpl3115a2
+        self.lw = tsl2591
+        super(GetSensorReadingsThread, self).__init__()
+
+    def run(self):
+        self.tempC = self.tw.temperature()  # temp in Celcius
+        self.tempF = (self.tempC * 1.8) + 32
+        self.pressure = (self.tw.pressure() / 1000)  # get pressure and convert to kPa
+        full, ir = self.lw.get_full_luminosity()  # read raw values (full spectrum and ir spectrum)
+        print("full: {0} ir: {1}".format(full, ir))
+        self.lux = self.lw.calculate_lux(full, ir)  # convert raw values to lux
+        time.sleep(3)
+
+# Globals
+textToWrite = ''
 
 # Special characters
 deg = u'\N{DEGREE SIGN}'
 
-# Raspberry Pi pin configuration for display:
-RST = "22"
-
-# I2C ADDRESS / BITS
-MPL3115A2_ADDRESS = 0x60
-SSD1306_ADDRESS = 0x3C
-# REGISTERS
-MPL3115A2_REGISTER_STATUS = 0x00
-MPL3115A2_REGISTER_STATUS_TDR = 0x02
-MPL3115A2_REGISTER_STATUS_PDR = 0x04
-MPL3115A2_REGISTER_STATUS_PTDR = 0x08
-
-MPL3115A2_REGISTER_PRESSURE_CSB = 0x02
-MPL3115A2_REGISTER_PRESSURE_LSB = 0x03
-MPL3115A2_REGISTER_PRESSURE_MSB = 0x01
-
-MPL3115A2_REGISTER_TEMP_MSB = 0x04
-MPL3115A2_REGISTER_TEMP_LSB = 0x05
-
-MPL3115A2_REGISTER_DR_STATUS = 0x06
-
-MPL3115A2_OUT_P_DELTA_MSB = 0x07
-MPL3115A2_OUT_P_DELTA_CSB = 0x08
-MPL3115A2_OUT_P_DELTA_LSB = 0x09
-
-MPL3115A2_OUT_T_DELTA_MSB = 0x0A
-MPL3115A2_OUT_T_DELTA_LSB = 0x0B
-
-MPL3115A2_BAR_IN_MSB = 0x14
-
-MPL3115A2_WHOAMI = 0x0C
-
-# BITS
-
-MPL3115A2_PT_DATA_CFG = 0x13
-MPL3115A2_PT_DATA_CFG_TDEFE = 0x01
-MPL3115A2_PT_DATA_CFG_PDEFE = 0x02
-MPL3115A2_PT_DATA_CFG_DREM = 0x04
-
-MPL3115A2_CTRL_REG1 = 0x26
-MPL3115A2_CTRL_REG1_SBYB = 0x01
-MPL3115A2_CTRL_REG1_OST = 0x02
-MPL3115A2_CTRL_REG1_RST = 0x04
-MPL3115A2_CTRL_REG1_OS1 = 0x00
-MPL3115A2_CTRL_REG1_OS2 = 0x08
-MPL3115A2_CTRL_REG1_OS4 = 0x10
-MPL3115A2_CTRL_REG1_OS8 = 0x18
-MPL3115A2_CTRL_REG1_OS16 = 0x20
-MPL3115A2_CTRL_REG1_OS32 = 0x28
-MPL3115A2_CTRL_REG1_OS64 = 0x30
-MPL3115A2_CTRL_REG1_OS128 = 0x38
-MPL3115A2_CTRL_REG1_RAW = 0x40
-MPL3115A2_CTRL_REG1_ALT = 0x80
-MPL3115A2_CTRL_REG1_BAR = 0x00
-MPL3115A2_CTRL_REG2 = 0x27
-MPL3115A2_CTRL_REG3 = 0x28
-MPL3115A2_CTRL_REG4 = 0x29
-MPL3115A2_CTRL_REG5 = 0x2A
-
-MPL3115A2_REGISTER_STARTCONVERSION = 0x12
-
-
-class DisplayWrapper:
-    _display = None
-    _draw = None
-    _image = None
-    _font = None
-    _height = 0
-    _width = 0
-
-    def __init__(self):
-        # 128x32 display with hardware I2C:
-        self._display = Adafruit_SSD1306.SSD1306_128_32(rst=RST, i2c_bus=0)
-        # Initialize library.
-        self._display.begin()
-        # Clear display.
-        self._display.clear()
-        self._display.display()
-        # Create blank image for drawing.
-        # Make sure to create image with mode '1' for 1-bit color.
-        self._width = self._display.width
-        self._height = self._display.height
-        self._image = Image.new('1', (self._width, self._height))
-        # Get drawing object to draw on image.
-        self._draw = ImageDraw.Draw(self._image)
-        # Load default font.
-        self._font = ImageFont.load_default()
-
-    @property
-    def height(self):
-        return self._height
-
-    @property
-    def width(self):
-        return self._width
-
-    def clearDisplay(self):
-        self._draw.rectangle((0, 0, self._width, self._height), outline=0, fill=0)
-
-    def drawText(self, texttowrite, x, y):
-        self._draw.text((x, y), texttowrite, font=self._font, fill=255)
-
-    def displayImage(self):
-        self._display.image(self._image)
-        self._display.display()
-
-
-class TempWrapper:
-    _bus=None
-
-    def __init__(self):
-        self._bus = SMBus(0)
-        whoami = self._bus.read_byte_data(MPL3115A2_ADDRESS, MPL3115A2_WHOAMI)
-
-        if whoami != 0xc4:
-            print("MPL3115A2 not active.")
-            exit(1)
-
-        # Set MPL3115A2 oversampling to 128, put in Altimeter mode, enabled standby on CTRL_REG1
-        self._bus.write_byte_data(
-            MPL3115A2_ADDRESS,
-            MPL3115A2_CTRL_REG1,
-            MPL3115A2_CTRL_REG1_SBYB |
-            MPL3115A2_CTRL_REG1_OS128 |
-            MPL3115A2_CTRL_REG1_ALT)
-
-        # Configure MPL3115A2
-        self._bus.write_byte_data(
-            MPL3115A2_ADDRESS,
-            MPL3115A2_PT_DATA_CFG,
-            MPL3115A2_PT_DATA_CFG_TDEFE |
-            MPL3115A2_PT_DATA_CFG_PDEFE |
-            MPL3115A2_PT_DATA_CFG_DREM)
-
-
-    def poll(self):
-        sta = 0
-        while not (sta & MPL3115A2_REGISTER_STATUS_PDR):
-            sta = self._bus.read_byte_data(MPL3115A2_ADDRESS, MPL3115A2_REGISTER_STATUS)
-
-
-    def altitude(self):
-        # print "Reading Altitude Data..."
-        self._bus.write_byte_data(
-            MPL3115A2_ADDRESS,
-            MPL3115A2_CTRL_REG1,
-            MPL3115A2_CTRL_REG1_SBYB |
-            MPL3115A2_CTRL_REG1_OS128 |
-            MPL3115A2_CTRL_REG1_ALT)  # change to altimeter mode
-
-        self.poll()
-
-        msb, csb, lsb = self._bus.read_i2c_block_data(MPL3115A2_ADDRESS, MPL3115A2_REGISTER_PRESSURE_MSB, 3)
-        # print msb, csb, lsb
-
-        alt = float((((msb << 24) | (csb << 16) | lsb) * 10) / 65536)
-
-        # correct sign
-        if alt > (1 << 15):
-            alt -= 1 << 16
-
-        return alt
-
-
-    def pressure(self):
-        # print "Reading Pressure Data..."
-        self._bus.write_byte_data(
-            MPL3115A2_ADDRESS,
-            MPL3115A2_CTRL_REG1,
-            MPL3115A2_CTRL_REG1_SBYB |
-            MPL3115A2_CTRL_REG1_OS128 |
-            MPL3115A2_CTRL_REG1_BAR)  # change to barometer mode
-
-        self.poll()
-
-        msb, csb, lsb = self._bus.read_i2c_block_data(MPL3115A2_ADDRESS, MPL3115A2_REGISTER_PRESSURE_MSB, 3)
-        # print msb, csb, lsb
-
-        return ((msb << 16) | (csb << 8) | lsb) / 64.
-
-    def calibrate(self):
-        # print "Calibrating..."
-        p = 0
-        t = 0
-        a = 0
-
-        for _i in np.arange(1, 6, 1):
-            p += self.pressure()
-            t += self.temperature()
-            a += self.altitude()
-
-        pa = int((p / 10) / 2)
-        ta = (t / 10)
-        aa = (a / 10)
-
-        self._bus.write_i2c_block_data(MPL3115A2_ADDRESS, MPL3115A2_BAR_IN_MSB, [pa >> 8 & 0xff, pa & 0xff])
-
-        return [pa, ta, aa]
-
-
-    def temperature(self):
-        # print "Reading Temperature Data..."
-
-        self._bus.write_byte_data(
-            MPL3115A2_ADDRESS,
-            MPL3115A2_CTRL_REG1,
-            MPL3115A2_CTRL_REG1_SBYB |
-            MPL3115A2_CTRL_REG1_OS128 |
-            MPL3115A2_CTRL_REG1_BAR)
-
-        self.poll()
-
-        t_data = self._bus.read_i2c_block_data(MPL3115A2_ADDRESS, 0x04, 2)
-        #status = _bus.read_byte_data(MPL3115A2_ADDRESS, 0x00)
-
-        # print t_data
-
-        return t_data[0] + (t_data[1] >> 4) / 16.0
-
-
-dw = DisplayWrapper()
-tw = TempWrapper()
+dw = Ssd1306()
+tw = Mpl3115a2()
+lw = Tsl2591()
 
 try:
     # Draw a black filled box to clear the image.
@@ -256,20 +57,53 @@ try:
     tw.calibrate()
 
     i = 0
+    x_max = dw.width
+    x = x_max
+
+    sensor_thread = None
+    tempC = 0
+    tempF = 0
+    press = 0
+    lux = 0
 
     while 1:
-        # get readings
-        tempC = tw.temperature()  # temp in Celcius
-        tempF = (tempC * 1.8) + 32
-        press = (tw.pressure() / 1000)  # get pressure and convert to kPa
+        image_width = dw.imageWidth()
+        thread_count = threading.activeCount()
+        if x <= (-1 * (x_max + image_width)):
+            x = x_max
+
+        if thread_count == 1:
+            sensor_thread = GetSensorReadingsThread(tw, lw)
+            sensor_thread.start()
+
+        if sensor_thread is not None:
+            tempC = sensor_thread.tempC
+            tempF = sensor_thread.tempF
+            press = sensor_thread.pressure
+            sensor_lux = sensor_thread.lux
+            if sensor_lux != 0:
+                lux = sensor_lux
+
+        # draw readings to image
+        textToWrite = 'TempC: ' + "{0:.2f}".format(tempC) + deg + 'C '
+        textToWrite += 'TempF: ' + "{0:.2f}".format(tempF) + deg + 'F '
+        textToWrite += 'Pressure: ' + "{0:.2f}".format(press) + ' kPa '
+        textToWrite += 'Luminosity: ' + "{0:.2f}".format(lux) + ' Lux '
+
         # clear display
         dw.clearDisplay()
-        # draw readings to image
-        dw.drawText('TempC: ' + "{0:.2f}".format(tempC) + deg + ' C', x, top)
-        dw.drawText('TempF: ' + "{0:.2f}".format(tempF) + deg + ' F', x, top + 10)
-        dw.drawText('Pressure: ' + "{0:.2f}".format(press) + ' kPa', x, top + 20)
+        dw.drawText(textToWrite, x, top + 10)
         # Display image.
         dw.displayImage()
+        print("x: {0}".format(x))
+        print("{0:.2f} wide".format(image_width))
+        print("threads: {0}".format(thread_count))
+        print("{0:.2f}".format(tempC) + deg + 'C ')
+        print("{0:.2f}".format(tempF) + deg + 'F ')
+        print("{0:.2f}".format(press) + ' kPa ')
+        print("{0:.2f} Lux".format(lux))
+
+        x -= 1
 
 except OSError as err:
     print("OS Error: {0}".format(err))
