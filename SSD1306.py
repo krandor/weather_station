@@ -45,16 +45,20 @@ class Ssd1306(object):
     def width(self):
         return self._width
 
-    def clearDisplay(self):
+    def clear_display(self):
         self._draw.rectangle((0, 0, self._width, self._height), outline=0, fill=0)
 
-    def drawText(self, texttowrite, x, y):
+    def draw_text(self, texttowrite, x, y):
         self._draw.text((x, y), texttowrite, font=self._font, fill=255)
 
-    def displayImage(self):
+    def display_image(self):
         self._display.image(self._image)
         self._display.display()
 
-    def imageWidth(self):
+    def image_width(self):
         width, height = self._image.size
+        return width
+
+    def get_text_width(self, text):
+        width, height = self._font.getsize(text)
         return width

@@ -63,7 +63,7 @@ MPL3115A2_REGISTER_STARTCONVERSION = 0x12
 class Mpl3115a2(object):
     _bus = None
 
-    def __init__(self, i2c_bus = 0):
+    def __init__(self, i2c_bus=0):
         """
         :type i2c_bus: int specifying i2c bus number
         """
@@ -95,7 +95,7 @@ class Mpl3115a2(object):
         while not (sta & MPL3115A2_REGISTER_STATUS_PDR):
             sta = self._bus.read_byte_data(MPL3115A2_ADDRESS, MPL3115A2_REGISTER_STATUS)
 
-    def altitude(self):
+    def get_altitude(self):
         # print "Reading Altitude Data..."
         self._bus.write_byte_data(
             MPL3115A2_ADDRESS,
@@ -117,7 +117,7 @@ class Mpl3115a2(object):
 
         return alt
 
-    def pressure(self):
+    def get_pressure(self):
         # print "Reading Pressure Data..."
         self._bus.write_byte_data(
             MPL3115A2_ADDRESS,
@@ -141,10 +141,10 @@ class Mpl3115a2(object):
         calibration_rounds = 5
 
         for _i in np.arange(0, calibration_rounds, 1):
-            p += self.pressure()
-            t += self.temperature()
-            a += self.altitude()
-            print("Calibration Round: {0} of {1}".format(_i, calibration_rounds))
+            p += self.get_pressure()
+            t += self.get_temperature()
+            a += self.get_altitude()
+            print("MPL3115A2 Calibration Round: {0} of {1}".format((_i+1), calibration_rounds))
 
         pa = int((p / 10) / 2)
         ta = (t / 10)
@@ -154,7 +154,7 @@ class Mpl3115a2(object):
 
         return [pa, ta, aa]
 
-    def temperature(self):
+    def get_temperature(self):
         # print "Reading Temperature Data..."
 
         self._bus.write_byte_data(
@@ -166,7 +166,7 @@ class Mpl3115a2(object):
 
         self.poll()
 
-        t_data = self._bus.read_i2c_block_data(MPL3115A2_ADDRESS, 0x04, 2)
+        t_data = self._bus.read_i2c_block_data(MPL3115A2_ADDRESS, MPL3115A2_REGISTER_STATUS_PDR, 2)
         # status = _bus.read_byte_data(MPL3115A2_ADDRESS, 0x00)
 
         # print t_data
